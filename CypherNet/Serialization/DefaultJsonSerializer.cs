@@ -24,7 +24,12 @@
         public string Serialize(object objToSerialize)
         {
             var sw = new StringWriter();
-            _serializer.Serialize(sw, objToSerialize);
+            using (var writer = new JsonTextWriter(sw))
+            {
+                writer.QuoteName = false;
+                this._serializer.Serialize(writer, objToSerialize);
+            }
+            
             return sw.ToString();
         }
 
