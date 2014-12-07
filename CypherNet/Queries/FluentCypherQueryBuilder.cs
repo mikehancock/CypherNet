@@ -6,6 +6,9 @@
     using System.Collections.Generic;
     using System.Linq;
     using System.Linq.Expressions;
+
+    using CypherNet.Core;
+
     using Transaction;
 
     #endregion
@@ -15,7 +18,7 @@
                                                    ICypherQuerySetable<TIn>, ICypherQueryCreate<TIn>
 
     {
-        private readonly ICypherClientFactory _clientFactory;
+        private readonly INeoClient client;
         private readonly string _cypherQuery = String.Empty;
         private Expression<Func<ICreateRelationshipQueryContext<TIn>, ICreateCypherRelationship>> _createClause;
         private Expression<Func<IMatchQueryContext<TIn>, IDefineCypherRelationship>>[] _matchClauses;
@@ -23,9 +26,9 @@
         private Expression<Action<IStartQueryContext<TIn>>> _startDef;
         private Expression<Func<IWhereQueryContext<TIn>, bool>> _wherePredicate;
 
-        internal FluentCypherQueryBuilder(ICypherClientFactory clientFactory)
+        internal FluentCypherQueryBuilder(INeoClient client)
         {
-            _clientFactory = clientFactory;
+            client = client;
         }
 
         internal string CypherQuery
@@ -43,7 +46,7 @@
         {
             _setters = setters;
             var query = BuildCypherQueryDefinition<TIn>();
-            return new CypherQueryExecute<TIn>(_clientFactory, query);
+            return new CypherQueryExecute<TIn>(client, query);
         }
 
         public ICypherQueryReturns<TIn> Where(Expression<Func<IWhereQueryContext<TIn>, bool>> predicate)
@@ -56,7 +59,7 @@
         {
             var query = BuildCypherQueryDefinition<TOut>();
             query.ReturnClause = func;
-            return new CypherQueryExecute<TOut>(_clientFactory, query);
+            return new CypherQueryExecute<TOut>(client, query);
         }
 
         private CypherQueryDefinition<TIn,TOut> BuildCypherQueryDefinition<TOut>()
@@ -108,17 +111,17 @@
                 query.AddSetClause(m);
             }
 
-            return new CypherQueryExecute<TOut>(_clientFactory, query);
+            return new CypherQueryExecute<TOut>(client, query);
         }
 
         internal class CypherQueryExecute<TOut> : ICypherOrderBy<TIn, TOut>, ICypherQueryReturnOrExecute<TIn>
         {
-            private readonly ICypherClientFactory _clientFactory;
+            private readonly INeoClient client;
             private readonly CypherQueryDefinition<TIn, TOut> _query;
 
-            internal CypherQueryExecute(ICypherClientFactory clientFactory, CypherQueryDefinition<TIn, TOut> query)
+            internal CypherQueryExecute(INeoClient client, CypherQueryDefinition<TIn, TOut> query)
             {
-                _clientFactory = clientFactory;
+                this.client = client;
                 _query = query;
             }
 
@@ -147,22 +150,28 @@
             public IEnumerable<TOut> Fetch()
             {
                 var cypherQuery = _query.BuildStatement();
-                var client = _clientFactory.Create();
-                return client.ExecuteQuery<TOut>(cypherQuery);
+                var result = this.client.QueryAsync(cypherQuery).Result;
+
+                var list = new List<TOut>();
+                while (result.Read())
+                {
+                    list.Add(result.Get<TOut>(1));
+                }
+
+                return list;
             }
 
             public ICypherOrderBy<TIn, TOut1> Return<TOut1>(Expression<Func<IReturnQueryContext<TIn>, TOut1>> returnsClause)
             {
                 var query = _query.Copy<TOut1>();
                 query.ReturnClause = returnsClause;
-                return new CypherQueryExecute<TOut1>(_clientFactory, query);
+                return new CypherQueryExecute<TOut1>(client, query);
             }
 
             void ICypherExecuteable.Execute()
             {
                 var cypherQuery = _query.BuildStatement();
-                var client = _clientFactory.Create();
-                client.ExecuteCommand(cypherQuery);
+                this.client.ExecuteAsync(cypherQuery).Wait();
             }
 
         }

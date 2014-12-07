@@ -11,6 +11,8 @@ using Moq;
 
 namespace CypherNet.UnitTests
 {
+    using CypherNet.Core;
+
     [TestClass]
     public class CypherSessionTransactionTests
     {
@@ -29,7 +31,7 @@ namespace CypherNet.UnitTests
         {
             var mock = InitializeMockWebClient(AutoCommitAddress);
 
-            var session = new CypherSession(BaseUri, mock.Object);
+            var session = new CypherSession(mock.Object);
             var node = session.CreateNode(new {name = Name}, "person");
             Assert.AreEqual(node.AsDynamic().name, Name);
             Assert.AreEqual((node).Labels.First(), "person");
@@ -40,11 +42,11 @@ namespace CypherNet.UnitTests
         {
             var mock = InitializeMockWebClient(BeginTransactionUri);
 
-            //Keep alive.
+            // Keep alive.
             mock.Setup(m => m.PostAsync(KeepAliveAddress, EmptyRequest))
                 .Returns(() => BuildResponse(@"{""commit"":""" + CommitAddress + @""",""results"":[],""transaction"":{""expires"":""Wed, 02 Oct 2013 15:18:27 +0000""},""errors"":[]}"));
             
-            //Commit
+            // Commit
             mock.Setup(m => m.PostAsync(CommitAddress, EmptyRequest)).Returns(() => BuildResponse(EmptyResponse));
 
             var session = new CypherSession(BaseUri, mock.Object);
@@ -76,14 +78,13 @@ namespace CypherNet.UnitTests
             mock.Verify(m => m.DeleteAsync(KeepAliveAddress));
         }
 
-        private Mock<IWebClient> InitializeMockWebClient(string uri)
+        private Mock<IWebClient> InitializeMockWebClient()
         {
-            var mock = new Mock<IWebClient>();
+            var mock = new Mock<INeoClient>();
 
             mock.Setup(
                 m =>
-                m.PostAsync(uri,
-                            @"{""statements"":[{""statement"":""CREATE (NewNode:person {param_0}) RETURN NewNode as NewNode, id(NewNode) as NewNode__Id, labels(NewNode) as NewNode__Labels;"",""parameters"":{""param_0"":{""name"":""" +
+                m.QueryAsync(@"{""statements"":[{""statement"":""CREATE (NewNode:person {param_0}) RETURN NewNode as NewNode, id(NewNode) as NewNode__Id, labels(NewNode) as NewNode__Labels;"",""parameters"":{""param_0"":{""name"":""" +
                             Name + @"""}}}]}"))
                 .Returns(
                     () =>

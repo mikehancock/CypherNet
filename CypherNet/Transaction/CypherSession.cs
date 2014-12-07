@@ -1,7 +1,4 @@
-﻿using System.Threading.Tasks;
-using CypherNet.Http;
-
-namespace CypherNet.Transaction
+﻿namespace CypherNet.Transaction
 {
     #region
 
@@ -10,6 +7,9 @@ namespace CypherNet.Transaction
     using System.Linq;
     using System.Linq.Expressions;
     using System.Reflection;
+
+    using CypherNet.Core;
+
     using Dynamic;
     using Graph;
     using Queries;
@@ -20,91 +20,34 @@ namespace CypherNet.Transaction
 
     public class CypherSession : ICypherSession
     {
-        private static readonly int[] MinimumVersionNumber = new[] {2, 0, 0};
-       
         private static readonly string NodeVariableName = ReflectOn<SingleNodeResult>.Member(a => a.NewNode).Name;
 
         private static readonly string CreateNodeClauseFormat =
             String.Format(@"CREATE ({0}{{0}} {{1}}) RETURN {0} as {{2}}, id({0}) as {{3}}, labels({0}) as {{4}};",
                           NodeVariableName);
 
-        private readonly string _uri;
         private readonly IWebSerializer _webSerializer;
         private readonly IEntityCache _entityCache;
-        private readonly IWebClient _webClient;
+        private readonly INeoClient _webClient;
 
-        internal CypherSession(string uri)
-            : this(uri, new WebClient())
+        internal CypherSession(INeoClient webClient)
         {
-        }
-
-        internal CypherSession(string uri, IWebClient webClient)
-        {
-            _uri = uri;
             _webClient = webClient;
             _entityCache = new DictionaryEntityCache();
             _webSerializer = new DefaultJsonSerializer(_entityCache);
-        }
-
-        internal void Connect()
-        {
-            IHttpResponseMessage response = null;
-            try
-            {
-                var getTask = _webClient.GetAsync(_uri);
-                getTask.Wait();
-                response = getTask.Result;
-            }
-            catch (Exception)
-            {
-                throw new NeoServerUnavalaibleExpcetion(_uri);
-            }
-            var readTask = response.Content.ReadAsStringAsync();
-            Task.WaitAll(readTask);
-            var json = readTask.Result;
-            var serviceResponse = _webSerializer.Deserialize<ServiceRootResponse>(json);
-
-            AssertVersion(serviceResponse);
-        }
-
-        private void AssertVersion(ServiceRootResponse response)
-        {
-            var serverversion = response.Version;
-            if (String.IsNullOrEmpty(serverversion))
-            {
-                throw new Exception("Cannot read Neo4j Server Version");
-            }
-            var versionNumberStrings = serverversion.Split(new[]{'.','-'}).Take(3).ToArray();
-            for (var i = 0; i < versionNumberStrings.Count(); i++)
-            {
-                var versionNumberString = versionNumberStrings[i];
-                var versionNumber = 0;
-                if (!int.TryParse(versionNumberString, out versionNumber))
-                {
-                    throw new Exception("Invalid Neo4j Server Version: " + serverversion);
-                }
-                if (versionNumber < MinimumVersionNumber[i])
-                {
-                    throw new Exception(String.Format("Incompatible Neo4j Server Version: {0}. Cypher.Net is currently only compatible with Neo4j versions {1} and above", serverversion, String.Join(".", MinimumVersionNumber)));
-                }
-                else if (versionNumber > MinimumVersionNumber[i])
-                {
-                    return;
-                }
-            }
         }
 
         #region ICypherSession Members
 
         public ICypherQueryStart<TVariables> BeginQuery<TVariables>()
         {
-            return new FluentCypherQueryBuilder<TVariables>(new CypherClientFactory(_uri, _webClient, _webSerializer));
+            return new FluentCypherQueryBuilder<TVariables>(this._webClient);
         }
 
         public ICypherQueryStart<TVariables> BeginQuery<TVariables>(
             Expression<Func<ICypherPrototype, TVariables>> variablePrototype)
         {
-            return new FluentCypherQueryBuilder<TVariables>(new CypherClientFactory(_uri, _webClient, _webSerializer));
+            return new FluentCypherQueryBuilder<TVariables>(this._webClient);
         }
 
         public Node CreateNode(object properties)
@@ -116,13 +59,16 @@ namespace CypherNet.Transaction
         {
             var props = _webSerializer.Serialize(properties);
             var propNames = new EntityReturnColumns(NodeVariableName);
-            var clause = String.Format(CreateNodeClauseFormat, String.IsNullOrEmpty(label) ? "" : ":" + label, props,
-                                       propNames.PropertiesPropertyName, propNames.IdPropertyName,
-                                       propNames.LabelsPropertyName);
-            var endpoint = new CypherClientFactory(_uri, _webClient, _webSerializer).Create();
-            var result = endpoint.ExecuteQuery<SingleNodeResult>(clause);
-            var node = result.First().NewNode;
-            return node;
+            var clause = string.Format(
+                CreateNodeClauseFormat,
+                string.IsNullOrEmpty(label) ? "" : ":" + label,
+                props,
+                propNames.PropertiesPropertyName,
+                propNames.IdPropertyName,
+                propNames.LabelsPropertyName);
+           
+            var result = this._webClient.QueryAsync(clause).Result;
+            return result.Read() ? result.Get<Node>(0) : null;
         }
 
 

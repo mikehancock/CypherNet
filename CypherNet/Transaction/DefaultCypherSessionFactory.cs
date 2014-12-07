@@ -4,29 +4,25 @@ namespace CypherNet.Transaction
 {
     #region
 
+    using CypherNet.Core;
+
     using Http;
 
     #endregion
 
     internal class DefaultCypherSessionFactory : ICypherSessionFactory
     {
-        private readonly string _sourceUri;
+        private readonly GraphStore store;
 
-        public DefaultCypherSessionFactory(string sourceUri)
+        public DefaultCypherSessionFactory(string baseUrl)
         {
-            _sourceUri = sourceUri;
+            this.store = new GraphStore(baseUrl);
+            this.store.Initialize();
         }
 
         public ICypherSession Create()
         {
-            return Create(_sourceUri);
-        }
-
-        public ICypherSession Create(string sourceUri)
-        {
-            var session = new CypherSession(sourceUri);
-            session.Connect();
-            return session;
+            return new CypherSession(this.store.GetClient());
         }
     }
 }
